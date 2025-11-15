@@ -1,0 +1,26 @@
+From d6f10d3f23868ddfc21de3966c80a71ac6a9f983 Mon Sep 17 00:00:00 2001
+From: Daniel Micay <danielmicay@gmail.com>
+Date: Sun, 14 May 2017 22:39:34 -0400
+Subject: [PATCH 014/102] stop hiding SLUB_DEBUG behind EXPERT
+
+It can make sense to disable this to reduce attack surface / complexity.
+---
+ mm/Kconfig.debug | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mm/Kconfig.debug b/mm/Kconfig.debug
+index 41a58536531d..9f7eccc63e66 100644
+--- a/mm/Kconfig.debug
++++ b/mm/Kconfig.debug
+@@ -47,7 +47,7 @@ config DEBUG_PAGEALLOC_ENABLE_DEFAULT
+ 
+ config SLUB_DEBUG
+ 	default y
+-	bool "Enable SLUB debugging support" if EXPERT
++	bool "Enable SLUB debugging support"
+ 	depends on SYSFS && !SLUB_TINY
+ 	select STACKDEPOT if STACKTRACE_SUPPORT
+ 	help
+-- 
+2.51.2
+

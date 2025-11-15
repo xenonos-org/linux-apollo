@@ -1,0 +1,24 @@
+From 42babfa8623f78d6abe4816f8e4a91f99deebe97 Mon Sep 17 00:00:00 2001
+From: Daniel Micay <danielmicay@gmail.com>
+Date: Sun, 28 May 2017 03:03:46 -0400
+Subject: [PATCH 025/102] disable NFS_DEBUG by default
+
+---
+ fs/nfs/Kconfig | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/fs/nfs/Kconfig b/fs/nfs/Kconfig
+index 07932ce9246c..c6754a2a6448 100644
+--- a/fs/nfs/Kconfig
++++ b/fs/nfs/Kconfig
+@@ -197,7 +197,6 @@ config NFS_USE_KERNEL_DNS
+ config NFS_DEBUG
+ 	bool
+ 	depends on NFS_FS && SUNRPC_DEBUG
+-	default y
+ 
+ config NFS_DISABLE_UDP_SUPPORT
+        bool "NFS: Disable NFS UDP protocol support"
+-- 
+2.51.2
+

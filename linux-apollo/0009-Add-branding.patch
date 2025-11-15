@@ -1,0 +1,26 @@
+From 834c9f83388a727d9b2bb4924ebb30a19d0cafaf Mon Sep 17 00:00:00 2001
+From: Rithvik Ballari <nexus-x@tuta.io>
+Date: Thu, 13 Nov 2025 22:18:42 +0530
+Subject: [PATCH 9/9] Add branding
+
+Signed-off-by: Rithvik Ballari <nexus-x@tuta.io>
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 9ded15dbc..a1d2c6eae 100644
+--- a/Makefile
++++ b/Makefile
+@@ -2,7 +2,7 @@
+ VERSION = 6
+ PATCHLEVEL = 12
+ SUBLEVEL = 57
+-EXTRAVERSION =
++EXTRAVERSION = -apollo
+ NAME = Baby Opossum Posse
+ 
+ # *DOCUMENTATION*
+-- 
+2.51.2
+

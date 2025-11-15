@@ -1,0 +1,25 @@
+From 1f2fd535eaa2579b1f3f3513904ceff27f17cbd7 Mon Sep 17 00:00:00 2001
+From: Levente Polyak <levente@leventepolyak.net>
+Date: Tue, 22 Dec 2020 23:35:53 +0100
+Subject: [PATCH 042/102] stop hiding SYSFS_SYSCALL behind EXPERT
+
+---
+ init/Kconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/init/Kconfig b/init/Kconfig
+index e61396989ff5..08949cf8e3cf 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -1580,7 +1580,7 @@ config SGETMASK_SYSCALL
+ 	  If unsure, leave the default option here.
+ 
+ config SYSFS_SYSCALL
+-	bool "Sysfs syscall support" if EXPERT
++	bool "Sysfs syscall support"
+ 	default y
+ 	help
+ 	  sys_sysfs is an obsolete system call no longer supported in libc.
+-- 
+2.51.2
+

@@ -1,0 +1,25 @@
+From 60aeb562f583c9e0f58e89d711bce337fb1a8448 Mon Sep 17 00:00:00 2001
+From: Rithvik Ballari <nexus-x@tuta.io>
+Date: Fri, 14 Nov 2025 19:16:31 +0530
+Subject: [PATCH 2/9] Enable net.ipv4.tcp_rfc1337 sysctl by default
+
+Signed-off-by: Rithvik Ballari <nexus-x@tuta.io>
+---
+ net/ipv4/tcp_ipv4.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/net/ipv4/tcp_ipv4.c b/net/ipv4/tcp_ipv4.c
+index 1572562b0..9185d7508 100644
+--- a/net/ipv4/tcp_ipv4.c
++++ b/net/ipv4/tcp_ipv4.c
+@@ -3461,6 +3461,7 @@ static int __net_init tcp_sk_init(struct net *net)
+ 	tcp_set_hashinfo(net);
+ 
+ 	net->ipv4.sysctl_tcp_sack = 1;
++	net->ipv4.sysctl_tcp_rfc1337 = 1;
+ 	net->ipv4.sysctl_tcp_window_scaling = 1;
+ 	net->ipv4.sysctl_tcp_timestamps = 1;
+ 	net->ipv4.sysctl_tcp_early_retrans = 3;
+-- 
+2.51.2
+

@@ -1,0 +1,27 @@
+From dbe2775e20ecc2a311561c9a6b8403cf8eb17e1a Mon Sep 17 00:00:00 2001
+From: Daniel Micay <danielmicay@gmail.com>
+Date: Sat, 27 May 2017 07:22:12 -0400
+Subject: [PATCH 001/102] make DEFAULT_MMAP_MIN_ADDR match LSM_MMAP_MIN_ADDR
+
+Signed-off-by: Daniel Micay <danielmicay@gmail.com>
+---
+ mm/Kconfig | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/mm/Kconfig b/mm/Kconfig
+index 59c36bb9ce6b..6b5af0d9fbeb 100644
+--- a/mm/Kconfig
++++ b/mm/Kconfig
+@@ -743,7 +743,8 @@ config KSM
+ config DEFAULT_MMAP_MIN_ADDR
+ 	int "Low address space to protect from user allocation"
+ 	depends on MMU
+-	default 4096
++	default 32768 if ARM || (ARM64 && COMPAT)
++	default 65536
+ 	help
+ 	  This is the portion of low virtual memory which should be protected
+ 	  from userspace allocation.  Keeping a user from writing to low pages
+-- 
+2.51.2
+

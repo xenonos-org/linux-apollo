@@ -1,0 +1,24 @@
+From 2f39311e665167b6d382865dd732cbd5852df639 Mon Sep 17 00:00:00 2001
+From: Daniel Micay <danielmicay@gmail.com>
+Date: Sun, 25 Feb 2018 02:15:24 -0500
+Subject: [PATCH 036/102] enable AUDIT by default
+
+---
+ init/Kconfig | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/init/Kconfig b/init/Kconfig
+index dc685a9d27bb..e61396989ff5 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -489,6 +489,7 @@ config USELIB
+ config AUDIT
+ 	bool "Auditing support"
+ 	depends on NET
++	default y
+ 	help
+ 	  Enable auditing infrastructure that can be used with another
+ 	  kernel subsystem, such as SELinux (which requires this for
+-- 
+2.51.2
+

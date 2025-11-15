@@ -1,0 +1,45 @@
+From d5512aafa5958897383ba7428f689d1da9195bdf Mon Sep 17 00:00:00 2001
+From: Ariadne Conill <ariadne@ariadne.space>
+Date: Sun, 7 Jul 2024 14:41:26 -0700
+Subject: [PATCH 03/29] mm: add openpax flags, settable via atomics
+
+Signed-off-by: Ariadne Conill <ariadne@ariadne.space>
+---
+ include/linux/mm_types.h       | 3 +++
+ include/linux/sched/coredump.h | 8 ++++++++
+ 2 files changed, 11 insertions(+)
+
+diff --git a/include/linux/mm_types.h b/include/linux/mm_types.h
+index 6894de506b36..53b6e031b577 100644
+--- a/include/linux/mm_types.h
++++ b/include/linux/mm_types.h
+@@ -963,6 +963,9 @@ struct mm_struct {
+ 		mm_context_t context;
+ 
+ 		unsigned long flags; /* Must use atomic bitops to access */
++#ifdef CONFIG_OPENPAX
++		unsigned long pax_flags;
++#endif
+ 
+ #ifdef CONFIG_AIO
+ 		spinlock_t			ioctx_lock;
+diff --git a/include/linux/sched/coredump.h b/include/linux/sched/coredump.h
+index e62ff805cfc9..b5c31fed6311 100644
+--- a/include/linux/sched/coredump.h
++++ b/include/linux/sched/coredump.h
+@@ -107,4 +107,12 @@ static inline unsigned long mmf_init_flags(unsigned long flags)
+ 	return flags & MMF_INIT_MASK;
+ }
+ 
++#ifdef CONFIG_OPENPAX
++#define PAXF_PAGEEXEC		1
++#define PAXF_EMUTRAMP		2
++#define PAXF_MPROTECT		3
++#define PAXF_RANDMMAP		4
++#define PAXF_SEGMEXEC		5
++#endif
++
+ #endif /* _LINUX_SCHED_COREDUMP_H */
+-- 
+2.51.2
+

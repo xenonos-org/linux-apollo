@@ -1,0 +1,26 @@
+From 5a32c99fdd1ab036bd5b9d983fea09a6615f7cf3 Mon Sep 17 00:00:00 2001
+From: Rithvik Ballari <nexus-x@tuta.io>
+Date: Fri, 14 Nov 2025 22:08:08 +0530
+Subject: [PATCH 8/9] Disable io_uring
+
+Signed-off-by: Rithvik Ballari <nexus-x@tuta.io>
+---
+ io_uring/io_uring.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index 68439eb0d..deb97a333 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -152,7 +152,7 @@ static void io_queue_sqe(struct io_kiocb *req);
+ struct kmem_cache *req_cachep;
+ static struct workqueue_struct *iou_wq __ro_after_init;
+ 
+-static int __read_mostly sysctl_io_uring_disabled = 1;
++static int __read_mostly sysctl_io_uring_disabled = 2;
+ static int __read_mostly sysctl_io_uring_group = -1;
+ 
+ #ifdef CONFIG_SYSCTL
+-- 
+2.51.2
+

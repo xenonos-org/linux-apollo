@@ -1,0 +1,40 @@
+From 4461953a07d986a9179e48ba63d116c7350a1998 Mon Sep 17 00:00:00 2001
+From: Ariadne Conill <ariadne@ariadne.space>
+Date: Sun, 7 Jul 2024 14:52:54 -0700
+Subject: [PATCH 04/29] mman: enforce MPROTECT when enabled for a task
+
+Signed-off-by: Ariadne Conill <ariadne@ariadne.space>
+---
+ include/linux/mman.h | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/include/linux/mman.h b/include/linux/mman.h
+index a842783ffa62..e108371ff12e 100644
+--- a/include/linux/mman.h
++++ b/include/linux/mman.h
+@@ -197,12 +197,21 @@ static inline bool arch_memory_deny_write_exec_supported(void)
+  * we propose to set.
+  *
+  * Return: false if proposed change is OK, true if not ok and should be denied.
++ *
++ * Note: If OpenPaX is enabled, it will be assumed that we want to deny
++ * PROT_WRITE | PROT_EXEC by default, unless the MPROTECT feature bit is
++ * disabled on a binary.
+  */
+ static inline bool map_deny_write_exec(unsigned long old, unsigned long new)
+ {
+ 	/* If MDWE is disabled, we have nothing to deny. */
+-	if (!test_bit(MMF_HAS_MDWE, &current->mm->flags))
++	if (
++#ifdef CONFIG_OPENPAX_MPROTECT
++	    !test_bit(PAXF_MPROTECT, &current->mm->pax_flags) &&
++#endif
++	    !test_bit(MMF_HAS_MDWE, &current->mm->flags)) {
+ 		return false;
++	}
+ 
+ 	/* If the new VMA is not executable, we have nothing to deny. */
+ 	if (!(new & VM_EXEC))
+-- 
+2.51.2
+

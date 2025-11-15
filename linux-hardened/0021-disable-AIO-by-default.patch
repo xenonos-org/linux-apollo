@@ -1,0 +1,24 @@
+From 3d7125bd96a69dff8dd626e46b5a089850ffc161 Mon Sep 17 00:00:00 2001
+From: Bernhard40 <32568352+Bernhard40@users.noreply.github.com>
+Date: Fri, 6 Oct 2017 10:24:10 +0000
+Subject: [PATCH 021/102] disable AIO by default
+
+---
+ init/Kconfig | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/init/Kconfig b/init/Kconfig
+index 4f17bc60e01f..dc685a9d27bb 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -1725,7 +1725,6 @@ config SHMEM
+ 
+ config AIO
+ 	bool "Enable AIO support"
+-	default y
+ 	help
+ 	  This option enables POSIX asynchronous I/O which may by used
+ 	  by some high performance threaded applications. Disabling
+-- 
+2.51.2
+

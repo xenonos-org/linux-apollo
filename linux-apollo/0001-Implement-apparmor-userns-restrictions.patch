@@ -1,0 +1,570 @@
+From 2b98f4aef56a06bba0708916b271299707bc7fa5 Mon Sep 17 00:00:00 2001
+From: Rithvik Ballari <nexus-x@tuta.io>
+Date: Thu, 13 Nov 2025 22:17:30 +0530
+Subject: [PATCH 1/9] Implement apparmor userns restrictions
+
+Signed-off-by: Rithvik Ballari <nexus-x@tuta.io>
+---
+ security/apparmor/apparmorfs.c         |   5 +
+ security/apparmor/include/apparmorfs.h |   6 +
+ security/apparmor/include/audit.h      |   3 +
+ security/apparmor/include/label.h      |  24 ++-
+ security/apparmor/include/policy.h     |   3 +
+ security/apparmor/include/task.h       |   5 +-
+ security/apparmor/lsm.c                | 141 ++++++++++++------
+ security/apparmor/policy.c             |   3 +
+ security/apparmor/task.c               | 199 +++++++++++++++++++++----
+ 9 files changed, 296 insertions(+), 93 deletions(-)
+
+diff --git a/security/apparmor/apparmorfs.c b/security/apparmor/apparmorfs.c
+index 01b923d97..f734168a7 100644
+--- a/security/apparmor/apparmorfs.c
++++ b/security/apparmor/apparmorfs.c
+@@ -1005,6 +1005,9 @@ static int aa_sfs_seq_show(struct seq_file *seq, void *v)
+ 	case AA_SFS_TYPE_U64:
+ 		seq_printf(seq, "%#08lx\n", fs_file->v.u64);
+ 		break;
++        case AA_SFS_TYPE_INTPTR:
++                seq_printf(seq, "%d\n", READ_ONCE(*fs_file->v.intptr));
++                break;
+ 	default:
+ 		/* Ignore unpritable entry types. */
+ 		break;
+@@ -2346,6 +2349,7 @@ static struct aa_sfs_entry aa_sfs_entry_domain[] = {
+ 
+ static struct aa_sfs_entry aa_sfs_entry_unconfined[] = {
+ 	AA_SFS_FILE_BOOLEAN("change_profile", 1),
++        AA_SFS_FILE_INTPTR("userns",            aa_unprivileged_userns_restricted),
+ 	{ }
+ };
+ 
+@@ -2380,6 +2384,7 @@ static struct aa_sfs_entry aa_sfs_entry_ns[] = {
+ 	AA_SFS_FILE_BOOLEAN("profile",		1),
+ 	AA_SFS_FILE_BOOLEAN("pivot_root",	0),
+ 	AA_SFS_FILE_STRING("mask", "userns_create"),
++        AA_SFS_FILE_STRING("userns_create", "pciu&"),
+ 	{ }
+ };
+ 
+diff --git a/security/apparmor/include/apparmorfs.h b/security/apparmor/include/apparmorfs.h
+index 1e94904f6..dc8a761e5 100644
+--- a/security/apparmor/include/apparmorfs.h
++++ b/security/apparmor/include/apparmorfs.h
+@@ -17,6 +17,7 @@ enum aa_sfs_type {
+ 	AA_SFS_TYPE_BOOLEAN,
+ 	AA_SFS_TYPE_STRING,
+ 	AA_SFS_TYPE_U64,
++	AA_SFS_TYPE_INTPTR,
+ 	AA_SFS_TYPE_FOPS,
+ 	AA_SFS_TYPE_DIR,
+ };
+@@ -33,6 +34,7 @@ struct aa_sfs_entry {
+ 		char *string;
+ 		unsigned long u64;
+ 		struct aa_sfs_entry *files;
++		int *intptr;
+ 	} v;
+ 	const struct file_operations *file_ops;
+ };
+@@ -51,6 +53,10 @@ extern const struct file_operations aa_sfs_seq_file_ops;
+ 	{ .name = (_name), .mode = 0444, \
+ 	  .v_type = AA_SFS_TYPE_U64, .v.u64 = (_value), \
+ 	  .file_ops = &aa_sfs_seq_file_ops }
++#define AA_SFS_FILE_INTPTR(_name, _value) \
++        { .name = (_name), .mode = 0444, \
++          .v_type = AA_SFS_TYPE_INTPTR, .v.intptr = &(_value), \
++          .file_ops = &aa_sfs_seq_file_ops }
+ #define AA_SFS_FILE_FOPS(_name, _mode, _fops) \
+ 	{ .name = (_name), .v_type = AA_SFS_TYPE_FOPS, \
+ 	  .mode = (_mode), .file_ops = (_fops) }
+diff --git a/security/apparmor/include/audit.h b/security/apparmor/include/audit.h
+index 0c8cc86b4..d767e9030 100644
+--- a/security/apparmor/include/audit.h
++++ b/security/apparmor/include/audit.h
+@@ -142,6 +142,9 @@ struct apparmor_audit_data {
+ 					void *addr;
+ 					int addrlen;
+ 				} net;
++                                struct {
++                                        const char *target;
++                                } ns;
+ 			};
+ 		};
+ 		struct {
+diff --git a/security/apparmor/include/label.h b/security/apparmor/include/label.h
+index 2a72e6b17..3f16f8455 100644
+--- a/security/apparmor/include/label.h
++++ b/security/apparmor/include/label.h
+@@ -129,6 +129,7 @@ struct aa_label {
+ 	long flags;
+ 	u32 secid;
+ 	int size;
++	u64 mediates;
+ 	struct aa_profile *vec[];
+ };
+ 
+@@ -255,20 +256,17 @@ for ((I).i = (I).j = 0;							\
+ #define fn_for_each_not_in_set(L1, L2, P, FN)				\
+ 	fn_for_each2_XXX((L1), (L2), P, FN, _not_in_set)
+ 
+-#define LABEL_MEDIATES(L, C)						\
+-({									\
+-	struct aa_profile *profile;					\
+-	struct label_it i;						\
+-	int ret = 0;							\
+-	label_for_each(i, (L), profile) {				\
+-		if (RULE_MEDIATES(&profile->rules, (C))) {		\
+-			ret = 1;					\
+-			break;						\
+-		}							\
+-	}								\
+-	ret;								\
+-})
++static inline bool label_mediates(struct aa_label *L, unsigned char C)
++{
++        return (L)->mediates & (((u64) 1) << (C));
++}
+ 
++static inline bool label_mediates_safe(struct aa_label *L, unsigned char C)
++{
++        if (C > AA_CLASS_LAST)
++                return false;
++        return label_mediates(L, C);
++}
+ 
+ void aa_labelset_destroy(struct aa_labelset *ls);
+ void aa_labelset_init(struct aa_labelset *ls);
+diff --git a/security/apparmor/include/policy.h b/security/apparmor/include/policy.h
+index 75088cc31..a734c4ac6 100644
+--- a/security/apparmor/include/policy.h
++++ b/security/apparmor/include/policy.h
+@@ -34,6 +34,9 @@
+ struct aa_ns;
+ 
+ extern int unprivileged_userns_apparmor_policy;
++extern int aa_unprivileged_userns_restricted;
++extern int aa_unprivileged_userns_restricted_force;
++extern int aa_unprivileged_userns_restricted_complain;
+ extern int aa_unprivileged_unconfined_restricted;
+ 
+ extern const char *const aa_profile_mode_names[];
+diff --git a/security/apparmor/include/task.h b/security/apparmor/include/task.h
+index b1aaaf60f..821f43f43 100644
+--- a/security/apparmor/include/task.h
++++ b/security/apparmor/include/task.h
+@@ -99,7 +99,8 @@ int aa_may_ptrace(const struct cred *tracer_cred, struct aa_label *tracer,
+ 
+ #define AA_USERNS_CREATE	8
+ 
+-int aa_profile_ns_perm(struct aa_profile *profile,
+-		       struct apparmor_audit_data *ad, u32 request);
++struct aa_label *aa_profile_ns_perm(struct aa_profile *profile,
++                                    struct apparmor_audit_data *ad,
++                                    u32 request);
+ 
+ #endif /* __AA_TASK_H */
+diff --git a/security/apparmor/lsm.c b/security/apparmor/lsm.c
+index 9a78fd365..cee5e44dd 100644
+--- a/security/apparmor/lsm.c
++++ b/security/apparmor/lsm.c
+@@ -1037,25 +1037,36 @@ static int apparmor_task_kill(struct task_struct *target, struct kernel_siginfo
+ 	return error;
+ }
+ 
+-static int apparmor_userns_create(const struct cred *cred)
+-{
+-	struct aa_label *label;
+-	struct aa_profile *profile;
+-	int error = 0;
+-	DEFINE_AUDIT_DATA(ad, LSM_AUDIT_DATA_TASK, AA_CLASS_NS,
+-			  OP_USERNS_CREATE);
+-
+-	ad.subj_cred = current_cred();
+-
+-	label = begin_current_label_crit_section();
+-	if (!unconfined(label)) {
+-		error = fn_for_each(label, profile,
+-				    aa_profile_ns_perm(profile, &ad,
+-						       AA_USERNS_CREATE));
+-	}
+-	end_current_label_crit_section(label);
+-
+-	return error;
++static int apparmor_userns_create(const struct cred *new_cred)
++{
++        struct aa_label *label;
++        struct aa_profile *profile;
++        int error = 0;
++
++        label = begin_current_label_crit_section();
++        /* remove unprivileged_userns_restricted check when unconfined is updated */
++        if (aa_unprivileged_userns_restricted ||
++            label_mediates(label, AA_CLASS_NS)) {
++                struct aa_label *new;
++                DEFINE_AUDIT_DATA(ad, LSM_AUDIT_DATA_TASK, AA_CLASS_NS,
++                                  OP_USERNS_CREATE);
++                ad.subj_cred = current_cred();
++
++                new = fn_label_build(label, profile, GFP_KERNEL,
++                                aa_profile_ns_perm(profile, &ad,
++                                                   AA_USERNS_CREATE));
++                if (IS_ERR(new)) {
++                        error = PTR_ERR(new);
++                } else if (new && cred_label(new_cred) != new) {
++                        aa_put_label(cred_label(new_cred));
++                        set_cred_label(new_cred, new);
++                } else {
++                        aa_put_label(new);
++                }
++        }
++        end_current_label_crit_section(label);
++
++        return error;
+ }
+ 
+ static void apparmor_sk_free_security(struct sock *sk)
+@@ -2023,50 +2034,84 @@ static int __init alloc_buffers(void)
+ 
+ #ifdef CONFIG_SYSCTL
+ static int apparmor_dointvec(const struct ctl_table *table, int write,
+-			     void *buffer, size_t *lenp, loff_t *ppos)
++                             void *buffer, size_t *lenp, loff_t *ppos)
+ {
+-	if (!aa_current_policy_admin_capable(NULL))
+-		return -EPERM;
+-	if (!apparmor_enabled)
+-		return -EINVAL;
++        if (!aa_current_policy_admin_capable(NULL))
++                return -EPERM;
++        if (!apparmor_enabled)
++                return -EINVAL;
+ 
+-	return proc_dointvec(table, write, buffer, lenp, ppos);
++        return proc_dointvec(table, write, buffer, lenp, ppos);
++}
++
++static int userns_restrict_dointvec(const struct ctl_table *table, int write,
++                                    void *buffer, size_t *lenp, loff_t *ppos)
++{
++        if (!apparmor_enabled)
++                return -EINVAL;
++        if (write && !aa_current_policy_admin_capable(NULL))
++                return -EPERM;
++
++        return proc_dointvec(table, write, buffer, lenp, ppos);
+ }
+ 
+ static struct ctl_table apparmor_sysctl_table[] = {
+ #ifdef CONFIG_USER_NS
+-	{
+-		.procname       = "unprivileged_userns_apparmor_policy",
+-		.data           = &unprivileged_userns_apparmor_policy,
+-		.maxlen         = sizeof(int),
+-		.mode           = 0600,
+-		.proc_handler   = apparmor_dointvec,
+-	},
++        {
++                .procname       = "unprivileged_userns_apparmor_policy",
++                .data           = &unprivileged_userns_apparmor_policy,
++                .maxlen         = sizeof(int),
++                .mode           = 0600,
++                .proc_handler   = apparmor_dointvec,
++        },
+ #endif /* CONFIG_USER_NS */
+-	{
+-		.procname       = "apparmor_display_secid_mode",
+-		.data           = &apparmor_display_secid_mode,
+-		.maxlen         = sizeof(int),
+-		.mode           = 0600,
+-		.proc_handler   = apparmor_dointvec,
+-	},
+-	{
+-		.procname       = "apparmor_restrict_unprivileged_unconfined",
+-		.data           = &aa_unprivileged_unconfined_restricted,
+-		.maxlen         = sizeof(int),
+-		.mode           = 0600,
+-		.proc_handler   = apparmor_dointvec,
+-	},
++        {
++                .procname       = "apparmor_display_secid_mode",
++                .data           = &apparmor_display_secid_mode,
++                .maxlen         = sizeof(int),
++                .mode           = 0600,
++                .proc_handler   = apparmor_dointvec,
++        },
++#ifdef CONFIG_USER_NS
++        {
++                .procname       = "apparmor_restrict_unprivileged_userns",
++                .data           = &aa_unprivileged_userns_restricted,
++                .maxlen         = sizeof(int),
++                .mode           = 0644,
++                .proc_handler   = userns_restrict_dointvec,
++        },
++        {
++                .procname       = "apparmor_restrict_unprivileged_userns_force",
++                .data           = &aa_unprivileged_userns_restricted_force,
++                .maxlen         = sizeof(int),
++                .mode           = 0600,
++                .proc_handler   = apparmor_dointvec,
++        },
++        {
++                .procname       = "apparmor_restrict_unprivileged_userns_complain",
++                .data           = &aa_unprivileged_userns_restricted_complain,
++                .maxlen         = sizeof(int),
++                .mode           = 0600,
++                .proc_handler   = apparmor_dointvec,
++        },
++#endif /* CONFIG_USER_NS */
++        {
++                .procname       = "apparmor_restrict_unprivileged_unconfined",
++                .data           = &aa_unprivileged_unconfined_restricted,
++                .maxlen         = sizeof(int),
++                .mode           = 0644,
++                .proc_handler   = userns_restrict_dointvec,
++        },
+ };
+ 
+ static int __init apparmor_init_sysctl(void)
+ {
+-	return register_sysctl("kernel", apparmor_sysctl_table) ? 0 : -ENOMEM;
++        return register_sysctl("kernel", apparmor_sysctl_table) ? 0 : -ENOMEM;
+ }
+ #else
+ static inline int apparmor_init_sysctl(void)
+ {
+-	return 0;
++        return 0;
+ }
+ #endif /* CONFIG_SYSCTL */
+ 
+diff --git a/security/apparmor/policy.c b/security/apparmor/policy.c
+index 105706abf..3277d385a 100644
+--- a/security/apparmor/policy.c
++++ b/security/apparmor/policy.c
+@@ -88,6 +88,9 @@
+ #include "include/resource.h"
+ 
+ int unprivileged_userns_apparmor_policy = 1;
++int aa_unprivileged_userns_restricted = 1;
++int aa_unprivileged_userns_restricted_force;
++int aa_unprivileged_userns_restricted_complain;
+ int aa_unprivileged_unconfined_restricted;
+ 
+ const char *const aa_profile_mode_names[] = {
+diff --git a/security/apparmor/task.c b/security/apparmor/task.c
+index c87fb9f4a..b7e419d58 100644
+--- a/security/apparmor/task.c
++++ b/security/apparmor/task.c
+@@ -304,40 +304,179 @@ int aa_may_ptrace(const struct cred *tracer_cred, struct aa_label *tracer,
+ /* call back to audit ptrace fields */
+ static void audit_ns_cb(struct audit_buffer *ab, void *va)
+ {
+-	struct apparmor_audit_data *ad = aad_of_va(va);
++        struct apparmor_audit_data *ad = aad_of_va(va);
+ 
+-	if (ad->request & AA_USERNS_CREATE)
+-		audit_log_format(ab, " requested=\"userns_create\"");
++        if (ad->request & AA_USERNS_CREATE)
++                audit_log_format(ab, " requested=\"userns_create\"");
++
++        if (ad->denied & AA_USERNS_CREATE)
++                audit_log_format(ab, " denied=\"userns_create\"");
++
++        if (ad->peer) {
++                audit_log_format(ab, " target=");
++                aa_label_xaudit(ab, labels_ns(ad->subj_label), ad->peer,
++                                FLAG_VIEW_SUBNS, GFP_KERNEL);
++        } else if (ad->ns.target) {
++                audit_log_format(ab, " target=");
++                audit_log_untrustedstring(ab, ad->ns.target);
++        }
+ 
+-	if (ad->denied & AA_USERNS_CREATE)
+-		audit_log_format(ab, " denied=\"userns_create\"");
+ }
+ 
+-int aa_profile_ns_perm(struct aa_profile *profile,
+-		       struct apparmor_audit_data *ad,
+-		       u32 request)
++/*
++ * Returns: refcounted label to change to, even if no change
++ *          PTR_ERR on failure
++ */
++static struct aa_label *ns_x_to_label(struct aa_profile *profile,
++                                      u32 xindex, const char **lookupname,
++                                      const char **info)
+ {
+-	struct aa_perms perms = { };
+-	int error = 0;
+-
+-	ad->subj_label = &profile->label;
+-	ad->request = request;
+-
+-	if (!profile_unconfined(profile)) {
+-		struct aa_ruleset *rules = list_first_entry(&profile->rules,
+-							    typeof(*rules),
+-							    list);
+-		aa_state_t state;
+-
+-		state = RULE_MEDIATES(rules, ad->class);
+-		if (!state)
+-			/* TODO: add flag to complain about unmediated */
+-			return 0;
+-		perms = *aa_lookup_perms(rules->policy, state);
+-		aa_apply_modes_to_perms(profile, &perms);
+-		error = aa_check_perms(profile, &perms, request, ad,
+-				       audit_ns_cb);
+-	}
++        struct aa_ruleset *rules = list_first_entry(&profile->rules,
++                                                    typeof(*rules), list);
++        struct aa_label *new = NULL;
++        u32 xtype = xindex & AA_X_TYPE_MASK;
++        struct aa_label *stack = NULL;
++
++        /* must be none or table */
++        switch (xtype) {
++        case AA_X_NONE:
++                /* default not failure */
++                *lookupname = NULL;
++                return NULL;
++                break;
++        case AA_X_TABLE:
++                /* TODO: fix when perm mapping done at unload */
++                /* released by caller
++                 * if null for both stack and direct want to try fallback
++                 */
++                new = x_table_lookup(profile, xindex, lookupname);
++                if (!new) {
++                        *info = "failed to find transition profile";
++                        return ERR_PTR(-ENOMEM);
++                }
++                if (**lookupname == '&') {
++                        stack = new;
++                        new = NULL;
++                }
++                break;
++        default:
++                *info = "invalid profile transition type";
++                return ERR_PTR(-EINVAL);
++                break;
++        }
++
++        /* stack is true if !new */
++        if (!new) {
++                if (xindex & AA_X_UNCONFINED) {
++                        new = aa_get_newest_label(ns_unconfined(profile->ns));
++                        *info = "ux fallback";
++                } else {
++                        if (xindex & AA_X_INHERIT) {
++                                /* (p|c|n)ix - don't change profile but do
++                                 * use the newest version
++                                 */
++                                *info = "ix fallback";
++                                /* no profile && no error */
++                        } /* else, stack is implicitly against current */
++                        new = aa_get_newest_label(&profile->label);
++                }
++        }
++
++        if (stack) {
++                /* base the stack on post domain transition */
++                struct aa_label *base = new;
++
++                new = aa_label_merge(base, stack, GFP_KERNEL);
++                /* null on error */
++                aa_put_label(base);
++                aa_put_label(stack);
++                if (!new)
++                        return ERR_PTR(-ENOMEM);
++        }
++
++        /* released by caller */
++        return new;
++}
+ 
+-	return error;
++struct aa_label *aa_profile_ns_perm(struct aa_profile *profile,
++                                    struct apparmor_audit_data *ad,
++                                    u32 request)
++{
++        struct aa_ruleset *rules = list_first_entry(&profile->rules,
++                                                    typeof(*rules), list);
++        struct aa_label *new;
++        struct aa_perms perms = { };
++        aa_state_t state;
++
++        ad->subj_label = &profile->label;
++        ad->request = request;
++        int error;
++
++
++        /* TODO: rework unconfined profile/dfa to mediate user ns, then
++         * we can drop the unconfined test
++         */
++        state = RULE_MEDIATES(rules, ad->class);
++        if (!state) {
++                /* TODO: this gets replaced when the default unconfined
++                 * profile dfa gets updated to handle this
++                 */
++                if (profile_unconfined(profile) &&
++                    profile == profiles_ns(profile)->unconfined) {
++                        if (!aa_unprivileged_userns_restricted ||
++                            ns_capable_noaudit(current_user_ns(),
++                                               CAP_SYS_ADMIN))
++                                return aa_get_newest_label(&profile->label);
++                        ad->info = "User namespace creation restricted";
++                        /* unconfined unprivileged user */
++                        /* don't just return: allow complain mode to override */
++// hardcode unconfined transition for now
++                        new = aa_label_parse(&profile->label,
++                                             "unprivileged_userns", GFP_KERNEL,
++                                             true, false);
++                        if (IS_ERR(new)) {
++                                ad->info = "Userns create restricted - failed to find unprivileged_userns profile";
++                                ad->error = PTR_ERR(new);
++                                ad->ns.target = "unprivileged_userns";
++                                new = NULL;
++                                perms.deny |= request;
++                                goto hard_coded;
++                        }
++                        ad->info = "Userns create - transitioning profile";
++                        perms.audit = request;
++                        perms.allow = request;
++                        goto hard_coded;
++// once we have special unconfined profile, jump to ns_x_to_label()
++// end hardcode
++                } else if (!aa_unprivileged_userns_restricted_force) {
++                        return aa_get_newest_label(&profile->label);
++                }
++                /* continue to mediation */
++        }
++
++        perms = *aa_lookup_perms(rules->policy, state);
++        new = ns_x_to_label(profile, perms.xindex, &ad->ns.target, &ad->info);
++        if (IS_ERR(new)) {
++                ad->error = PTR_ERR(new);
++                new = NULL;
++                perms.deny |= request;
++        } else if (!new) {
++                /* no transition - not done in x_to_label so we can track */
++                new = aa_get_label(&profile->label);
++        } else {
++hard_coded:
++                ad->peer = new;
++        }
++        if (aa_unprivileged_userns_restricted_complain)
++                perms.complain = ALL_PERMS_MASK;
++        // TODO: nnp
++        // TODO: complain mode support for transitions
++
++        aa_apply_modes_to_perms(profile, &perms);
++        error = aa_check_perms(profile, &perms, request, ad, audit_ns_cb);
++        if (error) {
++                aa_put_label(new);
++                return ERR_PTR(error);
++        }
++        return new;
+ }
+-- 
+2.51.2
+
